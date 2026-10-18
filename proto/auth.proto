@@ -1,0 +1,87 @@
+// Контракт gRPC между ShopAPI (клиент) и AuthService (сервер).
+// gRPC работает поверх HTTP/2.
+// JWT передаётся в metadata (аналог HTTP-заголовков), а не в теле запроса —
+// это стандарт индустрии, позволяет использовать прокси/Istio/LB.
+
+syntax = "proto3";                                          // версия синтаксиса Protocol Buffers, современная версия с 2016, предыдущие - deprecated.
+
+package com.karkaror.auth;                                  // задаёт protobuf-пакет (пространство имён для сообщений и сервисов) для разрешения конфликтов в protobuf (не для Java).
+
+// Опции генерации Java-кода
+option java_multiple_files = true;                          // каждый message → отдельный .java файл (если false - всё в одном файле, не стандартно).
+option java_package = "com.karkaror.auth.grpc";             // пакет для сгенерированных классов (соглашение: <project>.<module>.grpc — стандарт для gRPC-проектов).
+option java_outer_classname = "AuthServiceProto";           // задаёт имя "внешнего" класса-обёртки, который protoc создаст всегда (соглашение: <ServiceName>Proto — стандарт).
+
+service AuthService {                                       // Объявление gRPC-сервиса с именем AuthService (соглашение: <Domain>Service - AuthService, UserService, OrderService).
+
+  // Создание нового пользователя.
+  // Вход: email, имя, фамилия, телефон, пароль.
+  // Выход: JWT-токен + userId.
+  rpc Register(RegisterRequest) returns (AuthResponse);                       // Объявление RPC-метода Register
+
+  // Аутентификация пользователя по email + пароль.
+  // Выход: JWT-токен + userId.
+  rpc Login(LoginRequest) returns (AuthResponse);                             // Объявление RPC-метода Login
+
+  // Проверка валидности JWT.
+  // JWT передаётся в metadata: "authorization: Bearer <token>".
+  // Выход: valid (bool) + userId (если валиден).
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);    // Объявление RPC-метода ValidateToken
+
+  // Изменение пароля аутентифицированного пользователя.
+  // userId и старый пароль передаются в теле; новый пароль — тоже.
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse); // Объявление RPC-метода ChangePassword
+
+  // Сброс пароля: генерирует новый пароль, сохраняет хэш,
+  // выводит пароль в консоль (заглушка отправки на email).
+  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);    // Объявление RPC-метода ResetPassword
+}
+
+message RegisterRequest {            // Блок сообщений (messages) - определяет структуру данных для RPC.
+  string email        = 1;           // Число - бинарный тег поля (уникален в рамках message), тег определяют порядок в бинарном формате.
+  string first_name   = 2;           // Теги 1-15 — 1 байт (оптимальны),
+  string last_name    = 3;           // Теги 16-2047 — 2 байта и т.д.
+  string phone_number = 4;           // Часто используемые поля → меньшие теги.
+  string password     = 5;           // Порядок произвольный — не важен для работы, но важен для эффективности.
+}                                    // Важно: нельзя менять теги у существующих полей! Это сломает совместимость.
+
+message LoginRequest {
+  string email    = 1;
+  string password = 2;
+}
+
+message AuthResponse {
+  string token   = 1;               // AuthResponse один для Register и Login, т.к. одинаковая семантика, DRY.
+  string user_id = 2;               // snake_case — для полей (Protobuf convention + Cоглашение Google для .proto); Java-генерация сделает camelCase.
+}
+
+message ValidateTokenRequest {
+  // Пусто! Токен передаётся в gRPC metadata, а не в теле:
+  // Metadata.Key.of("authorization", ASCII_STRING_MARSHALLER) = "Bearer <token>"
+  // Сообщение не несёт данных — только «запрос на проверку».
+  // Почему не убрать его совсем: gRPC требует явный message для каждого rpc. Нельзя rpc ValidateToken() returns (...).
+  // Соглашение: пустой message с комментарием // empty — норма.
+}
+
+message ValidateTokenResponse {
+  bool   valid   = 1;               // Простое булево — «валиден/невалиден» (альтернатива: enum ValidationResult { VALID; EXPIRED; INVALID; } — избыточно).
+  string user_id = 2;
+}
+
+message ChangePasswordRequest {
+  string user_id      = 1;
+  string old_password = 2;
+  string new_password = 3;
+}
+
+message ChangePasswordResponse {
+  bool success = 1;
+}
+
+message ResetPasswordRequest {
+  string email = 1;
+}
+
+message ResetPasswordResponse {
+  bool success = 1;
+}
